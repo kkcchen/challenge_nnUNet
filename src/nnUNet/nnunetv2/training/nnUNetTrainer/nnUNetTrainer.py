@@ -693,8 +693,8 @@ class nnUNetTrainer(object):
                                         oversample_foreground_percent=self.oversample_foreground_percent,
                                         sampling_probabilities=None, pad_sides=None, transforms=val_transforms)
 
-        # allowed_num_processes = get_allowed_n_proc_DA()
-        allowed_num_processes = 0
+        allowed_num_processes = get_allowed_n_proc_DA()
+        # allowed_num_processes = 0
         if allowed_num_processes == 0:
             mt_gen_train = SingleThreadedAugmenter(dl_tr, None)
             mt_gen_val = SingleThreadedAugmenter(dl_val, None)
