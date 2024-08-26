@@ -153,8 +153,8 @@ class nnUNetTrainer(object):
         self.current_epoch = 0
         self.enable_deep_supervision = True
 
-        self.seg_loss_weight = 0.2 # between 0 and 1 (inclusive)
-        self.can_unfreeze_classifier = False
+        self.class_loss_add = 0.4 # between 0 and 1 (inclusive)
+        self.classifier_has_unfrozen = False
 
         ### Dealing with labels/regions
         self.label_manager = self.plans_manager.get_label_manager(dataset_json)
@@ -428,14 +428,16 @@ class nnUNetTrainer(object):
             seg_loss = loss(seg_output, target)
             class_loss = classification_loss(class_output, class_target)
             print(f"seg_loss: {seg_loss}, class_loss: {class_loss}")
-            if seg_loss < 1.2 and not self.can_unfreeze_classifier:
-                self.can_unfreeze_classifier = True
-                self.network.freeze_classifier(False)
-                self.seg_loss_weight = 0
-                self.network.freeze_encoder(False)
-                self.network.freeze_decoder(True)
-            return self.seg_loss_weight * seg_loss + (1 - self.seg_loss_weight) * class_loss
+            if seg_loss < 0.3 and not self.classifier_has_unfrozen:
+                self.classifier_has_unfrozen = True
+                self.freeze_classifier(False)
+            return seg_loss + self.class_loss_add * class_loss
         return combo_loss
+    
+    def freeze_classifier(self, freeze):
+        print("Freezing classifier", freeze)
+        self.network.freeze_classifier(freeze)    
+        self.class_loss_add = 0 if freeze else 0.4    
 
     def configure_rotation_dummyDA_mirroring_and_inital_patch_size(self):
         """
@@ -1002,6 +1004,12 @@ class nnUNetTrainer(object):
         else:
             target = target.to(self.device, non_blocking=True)
 
+        if isinstance(class_target, list):
+            class_target = [i.to(self.device, non_blocking=True) for i in class_target]
+        else:
+            class_target = class_target.to(self.device, non_blocking=True)
+
+
         self.optimizer.zero_grad(set_to_none=True)
         # Autocast can be annoying
         # If the device_type is 'cpu' then it's slow as heck and needs to be disabled.
@@ -1042,12 +1050,18 @@ class nnUNetTrainer(object):
     def validation_step(self, batch: dict) -> dict:
         data = batch['data']
         target = batch['target']
+        class_target = batch['classification_labels']
 
         data = data.to(self.device, non_blocking=True)
         if isinstance(target, list):
             target = [i.to(self.device, non_blocking=True) for i in target]
         else:
             target = target.to(self.device, non_blocking=True)
+
+        if isinstance(class_target, list):
+            class_target = [i.to(self.device, non_blocking=True) for i in class_target]
+        else:
+            class_target = class_target.to(self.device, non_blocking=True)
 
         # Autocast can be annoying
         # If the device_type is 'cpu' then it's slow as heck and needs to be disabled.
@@ -1378,8 +1392,7 @@ class nnUNetTrainer(object):
     def run_training(self):
         self.on_train_start()
         # first, freeze classifier
-        self.network.freeze_classifier(True)
-        self.seg_loss_weight = 1
+        self.freeze_classifier(True)
 
         for epoch in range(self.current_epoch, self.num_epochs):
             self.on_epoch_start()

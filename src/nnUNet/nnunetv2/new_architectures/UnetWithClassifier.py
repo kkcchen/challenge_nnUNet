@@ -3,10 +3,8 @@ from typing import Union, Type, List, Tuple
 import torch
 from dynamic_network_architectures.building_blocks.helper import convert_conv_op_to_dim
 from dynamic_network_architectures.building_blocks.plain_conv_encoder import PlainConvEncoder
-from dynamic_network_architectures.building_blocks.residual import BasicBlockD, BottleneckD
-from dynamic_network_architectures.building_blocks.residual_encoders import ResidualEncoder
-from dynamic_network_architectures.building_blocks.unet_decoder import UNetDecoder
-from dynamic_network_architectures.building_blocks.unet_residual_decoder import UNetResDecoder
+# from dynamic_network_architectures.building_blocks.unet_decoder import UNetDecoder
+from nnunetv2.new_architectures.MyUnetDecoder import MyUNetDecoder
 from dynamic_network_architectures.initialization.weight_init import InitWeights_He
 from dynamic_network_architectures.initialization.weight_init import init_last_bn_before_add_to_0
 from torch import nn
@@ -53,35 +51,42 @@ class UnetWithClassifier(nn.Module):
                                         n_conv_per_stage, conv_bias, norm_op, norm_op_kwargs, dropout_op,
                                         dropout_op_kwargs, nonlin, nonlin_kwargs, return_skips=True,
                                         nonlin_first=nonlin_first)
-        self.decoder = UNetDecoder(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision,
+        self.decoder = MyUNetDecoder(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision,
                                    nonlin_first=nonlin_first)
         
 
-        # self.further_encoder = PlainConvEncoder(input_channels=features_per_stage[-1], n_stages=3, features_per_stage=[128, 64, 16],
-        #                                         conv_op=conv_op, kernel_sizes=[3, 3, 3], strides=[1, 1, 1], n_conv_per_stage=[2, 2, 2],
-        #                                         conv_bias=conv_bias, norm_op=norm_op, norm_op_kwargs=norm_op_kwargs,
-        #                                         dropout_op=dropout_op, dropout_op_kwargs=dropout_op_kwargs, nonlin=nonlin,
-        #                                         nonlin_kwargs=nonlin_kwargs, return_skips=False, nonlin_first=nonlin_first)
+        class_layers = []
+        for channels in reversed(features_per_stage[:-1]):
+            class_layers.append(
+                nn.Sequential(
+                    nn.AdaptiveAvgPool2d(((1, 1))),
+                    nn.Flatten(),
+                    nn.Linear(channels, 128),
+                ) 
+            )
         
-        self.classifier = nn.Sequential(
-            nn.AdaptiveAvgPool2d(((2, 2))),
-            nn.Flatten(),
-            nn.Linear(features_per_stage[-1] * 2 * 2, 512), 
+        self.class_layers = nn.ModuleList(class_layers)
+
+        self.final_classifier = nn.Sequential(
+            nn.Linear(128 * (len(features_per_stage) - 1), 512),
             nn.BatchNorm1d(512),
             nn.ReLU(),
             nn.Linear(512, 256),
             nn.BatchNorm1d(256),
             nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Linear(128, 3)
+            nn.Linear(256, 3)
         )
 
     def forward(self, x):
         skips = self.encoder(x)
-        decoded = self.decoder(skips)
-        classification_output = self.classifier(skips[-1])
+        decoded, intermediates = self.decoder(skips)
+        
+        classification_outputs = []
+        for intermediate, class_layer in zip(intermediates, self.class_layers):
+            classification_outputs.append(class_layer(intermediate))
+        
+        classification_output_int = torch.cat(classification_outputs, dim=1)
+        classification_output = self.final_classifier(classification_output_int)
 
         return decoded, classification_output
     
@@ -97,7 +102,10 @@ class UnetWithClassifier(nn.Module):
     
     def freeze_classifier(self, freeze):
         print("Freezing classifier", freeze)
-        for param in self.classifier.parameters():
+        for layer in self.class_layers:
+            for param in layer.parameters():
+                param.requires_grad = not freeze
+        for param in self.final_classifier.parameters():
             param.requires_grad = not freeze
 
 
