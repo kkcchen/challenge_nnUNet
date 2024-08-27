@@ -59,10 +59,16 @@ class UnetWithClassifier(nn.Module):
         for channels in reversed(features_per_stage[:-1]):
             class_layers.append(
                 nn.Sequential(
-                    nn.AdaptiveAvgPool2d(((1, 1))),
+                    nn.Flatten(start_dim=2),
+                    nn.AdaptiveMaxPool1d(1),
                     nn.Flatten(),
                     nn.Linear(channels, 128),
-                ) 
+                    nn.BatchNorm1d(128),
+                    nn.ReLU(),
+                    nn.Linear(128, 128),
+                    nn.BatchNorm1d(128),
+                    nn.ReLU()
+                )
             )
         
         self.class_layers = nn.ModuleList(class_layers)

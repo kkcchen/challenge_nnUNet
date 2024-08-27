@@ -536,7 +536,7 @@ class nnUNetPredictor(object):
 
     def _internal_maybe_mirror_and_predict(self, x: torch.Tensor) -> torch.Tensor:
         mirror_axes = self.allowed_mirroring_axes if self.use_mirroring else None
-        prediction = self.network(x)
+        prediction, class_prediction = self.network(x)
 
         if mirror_axes is not None:
             # check for invalid numbers in mirror_axes
@@ -550,7 +550,9 @@ class nnUNetPredictor(object):
             for axes in axes_combinations:
                 prediction += torch.flip(self.network(torch.flip(x, axes)), axes)
             prediction /= (len(axes_combinations) + 1)
-        return prediction
+
+            class_prediction = torch.argmax(prediction, dim=1, keepdim=False)
+        return prediction, class_prediction
 
     def _internal_predict_sliding_window_return_logits(self,
                                                        data: torch.Tensor,
@@ -589,7 +591,7 @@ class nnUNetPredictor(object):
                 workon = data[sl][None]
                 workon = workon.to(self.device)
 
-                prediction = self._internal_maybe_mirror_and_predict(workon)[0].to(results_device)
+                prediction, _ = self._internal_maybe_mirror_and_predict(workon)[0].to(results_device)
 
                 if self.use_gaussian:
                     prediction *= gaussian

@@ -428,7 +428,7 @@ class nnUNetTrainer(object):
             seg_loss = loss(seg_output, target)
             class_loss = classification_loss(class_output, class_target)
             print(f"seg_loss: {seg_loss}, class_loss: {class_loss}")
-            if seg_loss < 0.3 and not self.classifier_has_unfrozen:
+            if seg_loss < 0.1 and not self.classifier_has_unfrozen:
                 self.classifier_has_unfrozen = True
                 self.freeze_classifier(False)
             return seg_loss + self.class_loss_add * class_loss
