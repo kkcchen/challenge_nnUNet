@@ -147,9 +147,9 @@ class nnUNetTrainer(object):
         self.initial_lr = 1e-2
         self.weight_decay = 3e-5
         self.oversample_foreground_percent = 0.33
-        self.num_iterations_per_epoch = 250
-        self.num_val_iterations_per_epoch = 50
-        self.num_epochs = 1000
+        self.num_iterations_per_epoch = 50
+        self.num_val_iterations_per_epoch = 15
+        self.num_epochs = 10
         self.current_epoch = 0
         self.enable_deep_supervision = True
 
@@ -1068,24 +1068,24 @@ class nnUNetTrainer(object):
         # If the device_type is 'mps' then it will complain that mps is not implemented, even if enabled=False is set. Whyyyyyyy. (this is why we don't make use of enabled=False)
         # So autocast will only be active if we have a cuda device.
         with autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context():
-            output = self.network(data)
+            seg_output, class_output = self.network(data)
             del data
-            l = self.loss(output, target)
+            l = self.loss(seg_output, class_output, target, class_target)
 
         # we only need the output with the highest output resolution (if DS enabled)
         if self.enable_deep_supervision:
-            output = output[0]
+            seg_output = seg_output[0]
             target = target[0]
 
         # the following is needed for online evaluation. Fake dice (green line)
-        axes = [0] + list(range(2, output.ndim))
+        axes = [0] + list(range(2, seg_output.ndim))
 
         if self.label_manager.has_regions:
-            predicted_segmentation_onehot = (torch.sigmoid(output) > 0.5).long()
+            predicted_segmentation_onehot = (torch.sigmoid(seg_output) > 0.5).long()
         else:
             # no need for softmax
-            output_seg = output.argmax(1)[:, None]
-            predicted_segmentation_onehot = torch.zeros(output.shape, device=output.device, dtype=torch.float32)
+            output_seg = seg_output.argmax(1)[:, None]
+            predicted_segmentation_onehot = torch.zeros(seg_output.shape, device=seg_output.device, dtype=torch.float32)
             predicted_segmentation_onehot.scatter_(1, output_seg, 1)
             del output_seg
 
@@ -1118,13 +1118,21 @@ class nnUNetTrainer(object):
             fp_hard = fp_hard[1:]
             fn_hard = fn_hard[1:]
 
-        return {'loss': l.detach().cpu().numpy(), 'tp_hard': tp_hard, 'fp_hard': fp_hard, 'fn_hard': fn_hard}
+        # validation for classification
+        predicted_labels = torch.argmax(class_output, dim=1, keepdim=False)
+        correct = (predicted_labels == class_target.flatten()).sum().item()
+        total = class_target.size()[0]
+
+
+        return {'loss': l.detach().cpu().numpy(), 'tp_hard': tp_hard, 'fp_hard': fp_hard, 'fn_hard': fn_hard, 'correct': correct, 'total': total}
 
     def on_validation_epoch_end(self, val_outputs: List[dict]):
         outputs_collated = collate_outputs(val_outputs)
         tp = np.sum(outputs_collated['tp_hard'], 0)
         fp = np.sum(outputs_collated['fp_hard'], 0)
         fn = np.sum(outputs_collated['fn_hard'], 0)
+        correct = np.sum(outputs_collated['correct'], 0)
+        total = np.sum(outputs_collated['total'], 0)
 
         if self.is_ddp:
             world_size = dist.get_world_size()
@@ -1152,6 +1160,7 @@ class nnUNetTrainer(object):
         self.logger.log('mean_fg_dice', mean_fg_dice, self.current_epoch)
         self.logger.log('dice_per_class_or_region', global_dc_per_class, self.current_epoch)
         self.logger.log('val_losses', loss_here, self.current_epoch)
+        print('correct', np.round(correct / total, decimals=4))
 
     def on_epoch_start(self):
         self.logger.log('epoch_start_timestamps', time(), self.current_epoch)

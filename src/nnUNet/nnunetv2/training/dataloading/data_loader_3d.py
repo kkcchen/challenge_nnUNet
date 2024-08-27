@@ -52,7 +52,7 @@ class nnUNetDataLoader3D(nnUNetDataLoaderBase):
             seg_all[j] = np.pad(seg, padding, 'constant', constant_values=-1)
 
             # get classification labels
-            classification_labels[j] = int(current_key[5])
+            classification_labels[j] = int(i[5])
 
         if self.transforms is not None:
             with torch.no_grad():
