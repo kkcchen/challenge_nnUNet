@@ -11,6 +11,16 @@ from torch import nn
 from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.dropout import _DropoutNd
 
+class MaxLayer(nn.Module):
+    def __init__(self, dim):
+        super(MaxLayer, self).__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        # Apply torch.max along the specified dimension
+        max_values, _ = torch.max(x, dim=self.dim)
+        return max_values
+
 class UnetWithClassifier(nn.Module):
     def __init__(self,
                  input_channels: int,
@@ -60,7 +70,7 @@ class UnetWithClassifier(nn.Module):
             class_layers.append(
                 nn.Sequential(
                     nn.Flatten(start_dim=2),
-                    nn.AdaptiveMaxPool1d(1),
+                    MaxLayer(-1),
                     nn.Flatten(),
                     nn.Linear(channels, 128),
                     nn.BatchNorm1d(128),
