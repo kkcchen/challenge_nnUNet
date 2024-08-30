@@ -591,7 +591,7 @@ class nnUNetPredictor(object):
                 workon = data[sl][None]
                 workon = workon.to(self.device)
 
-                prediction, _ = self._internal_maybe_mirror_and_predict(workon)[0].to(results_device)
+                prediction = self._internal_maybe_mirror_and_predict(workon)[0].to(results_device)
 
                 if self.use_gaussian:
                     prediction *= gaussian
