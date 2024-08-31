@@ -99,9 +99,9 @@ class UnetWithClassifier(nn.Module):
         hwd = (5, 8, 5)
 
         self.positional_embedding = nn.Parameter(torch.randn(n, d))
-        self.global_memory = nn.Parameter(torch.randn(n, d))
+        self.global_memory = nn.Parameter(torch.randn(1, n, d))
 
-        features_per_attention_stage = [features_per_stage[2], features_per_stage[4], features_per_stage[-1], features_per_stage[-4]]
+        features_per_attention_stage = [features_per_stage[2], features_per_stage[4], features_per_stage[-2], features_per_stage[-5]]
 
         self.attention_blocks = nn.ModuleList([
             AttentionBlock(encoding_scale_size=hwd,
@@ -133,12 +133,13 @@ class UnetWithClassifier(nn.Module):
         # classification_output_int = torch.cat(classification_outputs, dim=1)
         # classification_output = self.final_classifier(classification_output_int)
 
-        unet_layers = torch.cat([skips[2], skips[4], intermediates[0], intermediates[3]], dim=1)
-        memory = self.global_memory
+        unet_layers = [skips[2], skips[4], intermediates[0], intermediates[3]]
+        memory = self.global_memory.repeat(x.shape[0], 1, 1)
+
         for unet_layer, attention_block in zip(unet_layers, self.attention_blocks):
             memory = attention_block(unet_layer, memory, self.positional_embedding)
 
-        # memory should be n by d, 200 by 320
+        # memory should be batch by n by d, 200 by 320
 
         # mean pooling along the n dimension
         attention_output = memory.mean(dim=-2)
@@ -160,10 +161,8 @@ class UnetWithClassifier(nn.Module):
     
     def freeze_classifier(self, freeze):
         print("Freezing classifier", freeze)
-        for param in self.positional_embedding.parameters():
-            param.requires_grad = not freeze
-        for param in self.global_memory.parameters():
-            param.requires_grad = not freeze
+        self.positional_embedding.requires_grad = not freeze
+        self.global_memory.requires_grad = not freeze
         for attention_block in self.attention_blocks:
             for param in attention_block.parameters():
                 param.requires_grad = not freeze
