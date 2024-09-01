@@ -60,7 +60,6 @@ class AttentionBlock(nn.Module):
                 memory, # x_m
                 shared_position_embedding # x_pos
                 ):
-        batch_size = feature_map.shape[0]
 
         # interpolation
         feature_map = nn.functional.interpolate(feature_map, size=self.encoding_scale_size, mode=self.interpolate_mode, align_corners=True)
